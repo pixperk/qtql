@@ -420,7 +420,11 @@ func (s *Store) Process(input_parts []string) error {
 			log.Println("  (no results)")
 		}
 		for _, r := range results {
-			log.Printf("  %s: %s\n", r.Key.name, r.Value.data)
+			if plan.KeyOnly {
+				log.Printf("  %s\n", r.Key.name)
+			} else {
+				log.Printf("  %s: %s\n", r.Key.name, r.Value.data)
+			}
 		}
 
 	default:

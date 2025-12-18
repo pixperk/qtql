@@ -9,9 +9,11 @@ import (
 
 // QueryPlan represents a parsed query before building the operator tree
 // we want to apply limits after filters to match SQL semantics
+// Order: KVScan → Filters → Limit → Project
 type QueryPlan struct {
 	Filters []FilterClause
-	Limit   int // 0 means no limit
+	Limit   int  // 0 means no limit
+	KeyOnly bool // SELECT key (default false = return both)
 }
 
 type FilterClause struct {
@@ -25,12 +27,29 @@ func ParseQuery(parts []string) (*QueryPlan, error) {
 	plan := &QueryPlan{
 		Filters: []FilterClause{},
 		Limit:   0,
+		KeyOnly: false,
 	}
 
 	for i := 1; i < len(parts); i++ {
 		part := strings.ToUpper(parts[i])
 
 		switch part {
+		case "SELECT":
+			if i+1 >= len(parts) {
+				return nil, errors.New("SELECT requires column (key or *)")
+			}
+			col := strings.ToUpper(parts[i+1])
+
+			switch col {
+			case "KEY":
+				plan.KeyOnly = true
+			case "*", "KEY,VALUE", "VALUE,KEY":
+				plan.KeyOnly = false // both (default)
+			default:
+				return nil, errors.New("SELECT must be: key or * (for both)")
+			}
+			i++
+
 		case "LIMIT":
 			if i+1 >= len(parts) {
 				return nil, errors.New("LIMIT requires a number")
@@ -74,7 +93,7 @@ func ParseQuery(parts []string) (*QueryPlan, error) {
 }
 
 // BuildOperatorTree constructs the operator tree from a QueryPlan
-// Order: KVScan → Filters → Limit (SQL semantics)
+// Order: KVScan → Filters → Limit → Project (SQL semantics)
 func BuildOperatorTree(store *Store, plan *QueryPlan) Operator {
 	var op Operator = NewKVScan(store)
 
@@ -100,9 +119,14 @@ func BuildOperatorTree(store *Store, plan *QueryPlan) Operator {
 		}
 	}
 
-	// Apply limit last
+	// Apply limit
 	if plan.Limit > 0 {
 		op = &Limit{Input: op, Max: plan.Limit}
+	}
+
+	// Apply projection last
+	if plan.KeyOnly {
+		op = &Project{Input: op, KeyOnly: true}
 	}
 
 	return op
@@ -115,8 +139,15 @@ func PrintQueryPlan(plan *QueryPlan) string {
 	sb.WriteString("Query Plan:\n")
 	sb.WriteString("───────────\n")
 
-	// Build from top (limit) to bottom (scan)
+	// Build from top to bottom (execution order is bottom-up)
 	indent := 0
+
+	// Projection at top (executes last)
+	if plan.KeyOnly {
+		sb.WriteString(strings.Repeat("  ", indent))
+		sb.WriteString("→ Project (key only)\n")
+		indent++
+	}
 
 	if plan.Limit > 0 {
 		sb.WriteString(strings.Repeat("  ", indent))
