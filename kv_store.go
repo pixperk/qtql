@@ -7,6 +7,8 @@ import (
 	"hash/crc32"
 	"log"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -395,6 +397,63 @@ func (s *Store) Process(input_parts []string) error {
 			log.Printf("Key %s exists\n", key_name)
 		} else {
 			log.Printf("Key %s does not exist\n", key_name)
+		}
+
+		//query execution commands
+	case "SCAN":
+		// SCAN [LIMIT n] [WHERE key LIKE pattern] [WHERE value CONTAINS str]
+		scan := NewKVScan(s)
+		var op Operator = scan
+
+		//optional filters
+		for i := 1; i < len(input_parts); i++ {
+			part := strings.ToUpper(input_parts[i])
+			switch part {
+			case "LIMIT":
+				if i+1 < len(input_parts) {
+					n, err := strconv.Atoi(input_parts[i+1])
+					if err != nil {
+						return errors.New("invalid LIMIT value")
+					}
+					op = &Limit{Input: op, Max: n}
+					i++
+				}
+			case "WHERE":
+				// WHERE key LIKE pattern OR WHERE value CONTAINS str
+				if i+3 < len(input_parts) {
+					field := strings.ToUpper(input_parts[i+1])
+					operator := strings.ToUpper(input_parts[i+2])
+					operand := input_parts[i+3]
+
+					switch {
+					case field == "KEY" && operator == "LIKE":
+						pattern := operand
+						op = &Filter{Input: op, Pred: func(r Row) bool {
+							matched, _ := filepath.Match(pattern, r.Key.name)
+							return matched
+						}}
+					case field == "VALUE" && operator == "CONTAINS":
+						substr := operand
+						op = &Filter{Input: op, Pred: func(r Row) bool {
+							return strings.Contains(r.Value.data, substr)
+						}}
+					default:
+						return errors.New("unsupported WHERE clause: " + field + " " + operator)
+					}
+					i += 3
+				}
+			}
+		}
+
+		results, err := ExecuteQuery(op)
+		if err != nil {
+			return err
+		}
+		if len(results) == 0 {
+			log.Println("  (no results)")
+		}
+		for _, r := range results {
+			log.Printf("  %s: %s\n", r.Key.name, r.Value.data)
 		}
 
 	default:
