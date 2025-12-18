@@ -93,7 +93,7 @@ func ParseQuery(parts []string) (*QueryPlan, error) {
 }
 
 // BuildOperatorTree constructs the operator tree from a QueryPlan
-// Order: KVScan → Filters → Limit → Project (SQL semantics)
+// Order: KVScan then Filters then Limit then Project (SQL semantics)
 func BuildOperatorTree(store *Store, plan *QueryPlan) Operator {
 	var op Operator = NewKVScan(store)
 

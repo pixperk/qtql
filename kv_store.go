@@ -400,6 +400,17 @@ func (s *Store) Process(input_parts []string) error {
 		case "HYDRATE":
 		s.HydrateSampleData()
 
+	case "EXPLAIN":
+		// EXPLAIN SCAN [...]
+		if len(input_parts) < 2 || strings.ToUpper(input_parts[1]) != "SCAN" {
+			return errors.New("EXPLAIN requires SCAN command")
+		}
+		plan, err := ParseQuery(input_parts[1:]) // skip "EXPLAIN"
+		if err != nil {
+			return err
+		}
+		log.Print(PrintQueryPlan(plan))
+
 	//query execution commands
 	case "SCAN":
 		// SCAN [LIMIT n] [WHERE key LIKE pattern] [WHERE value CONTAINS str]
@@ -407,9 +418,6 @@ func (s *Store) Process(input_parts []string) error {
 		if err != nil {
 			return err
 		}
-
-		// Print the query plan
-		log.Print(PrintQueryPlan(plan))
 
 		// Build and execute the operator tree
 		op := BuildOperatorTree(s, plan)
